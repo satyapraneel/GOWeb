@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"time"
 
+	"github.com/satyapraneel/goweb/pkg/forms"
 	"github.com/satyapraneel/goweb/pkg/models"
 )
 
@@ -13,9 +14,18 @@ import (
 // At the moment it only contains one field, but we'll add more
 // to it as the build progresses.
 type templateData struct {
+	CSRFToken   string
 	CurrentYear int
-	Snippet     *models.Snippet
-	Snippets    []*models.Snippet
+
+	// FormData    url.Values
+	// FormErrors  map[string]string
+	// Update the templateData fields, removing the individual FormData and
+	// FormErrors fields and replacing them with a single Form field.
+	Form            *forms.Form
+	IsAuthenticated bool
+	Snippet         *models.Snippet
+	Snippets        []*models.Snippet
+	Flash           string
 }
 
 /* func newTemplateCache(dir string) (map[string]*template.Template, error) {
@@ -63,7 +73,10 @@ type templateData struct {
 // Create a humanDate function which returns a nicely formatted string
 // representation of a time.Time object.
 func humanDate(t time.Time) string {
-	return t.Format("02 Jan 2006 at 15:04")
+	if t.IsZero() {
+		return ""
+	}
+	return t.UTC().Format("02 Jan 2006 at 15:04")
 }
 
 // Initialize a template.FuncMap object and store it in a global variable. This is

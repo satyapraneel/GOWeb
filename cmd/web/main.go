@@ -1,14 +1,17 @@
 package main
 
 import (
+	"crypto/tls"
 	"database/sql"
 	"flag"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
+	"time"
 
 	_ "github.com/go-sql-driver/mysql"
+	"github.com/golangcollege/sessions"
 	"github.com/satyapraneel/goweb/pkg/models/mysql"
 )
 
@@ -21,13 +24,25 @@ type application struct {
 	errorLog      *log.Logger
 	infoLog       *log.Logger
 	snippets      *mysql.SnippetModel
+	sessions      *sessions.Session
 	templateCache map[string]*template.Template
+	users         *mysql.UserModel
 }
+
+type contextKey string
+
+const contextKeyIsAuthenticated = contextKey("isAuthenticated")
 
 func main() {
 
 	addr := flag.String("addr", ":4000", "HTTP network address")
 	dsn := flag.String("dsn", "root:root@/snippetbox?parseTime=true", "My sql")
+
+	// Define a new command-line flag for the session secret (a random key which
+	// will be used to encrypt and authenticate session cookies). It should be 32
+	// bytes long.
+	secret := flag.String("secret", "asdfg", "Session secret")
+
 	flag.Parse()
 	infoLog := log.New(os.Stderr, "INFO\t", log.Ldate|log.Ltime)
 	// Create a logger for writing error messages in the same way, but use stderr as
@@ -59,6 +74,12 @@ func main() {
 	}
 	defer f.Close()
 
+	// Use the sessions.New() function to initialize a new session manager,
+	// passing in the secret key as the parameter. Then we configure it so
+	// sessions always expires after 12 hours.
+	session := sessions.New([]byte(*secret))
+	session.Lifetime = 12 * time.Hour
+	session.Secure = true
 	// Initialize a new instance of application containing the dependencies.
 	// Initialize a mysql.SnippetModel instance and add it to the application
 	// dependencies.
@@ -67,6 +88,15 @@ func main() {
 		infoLog:       infoLog,
 		snippets:      &mysql.SnippetModel{DB: db},
 		templateCache: templateCache,
+		sessions:      session,
+		users:         &mysql.UserModel{DB: db},
+	}
+
+	// Initialize a tls.Config struct to hold the non-default TLS settings we want
+	// the server to use.
+	tlsConfig := &tls.Config{
+		PreferServerCipherSuites: true,
+		CurvePreferences:         []tls.CurveID{tls.X25519, tls.CurveP256},
 	}
 	// warningLog := log.New(os.Stderr, "Warning\t", 2)
 	// mux := http.NewServeMux()
@@ -84,15 +114,24 @@ func main() {
 	// that the server uses the same network address and routes as before, and set
 	// the ErrorLog field so that the server now uses the custom errorLog logger in
 	// the event of any problems.
+	// Set the server's TLSConfig field to use the tlsConfig variable we just
 	srv := &http.Server{
-		Addr:     *addr,
-		Handler:  app.routes(),
-		ErrorLog: errorLog,
+		Addr:         *addr,
+		Handler:      app.routes(),
+		ErrorLog:     errorLog,
+		TLSConfig:    tlsConfig,
+		IdleTimeout:  time.Minute,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 10 * time.Second,
 	}
 	// Write messages using the two new loggers, instead of the standard logger.
 	infoLog.Printf("Starting server on %s", *addr)
-	// // Call the ListenAndServe() method on our new http.Server struct.
-	err = srv.ListenAndServe()
+	//Call the ListenAndServe() method on our new http.Server struct.
+	// err = srv.ListenAndServe()
+	// Use the ListenAndServeTLS() method to start the HTTPS server. We
+	// pass in the paths to the TLS certificate and corresponding private key as
+	// the two parameters.
+	err = srv.ListenAndServeTLS("./tls/cert.pem", "./tls/key.pem")
 	errorLog.Fatal(err)
 }
 
